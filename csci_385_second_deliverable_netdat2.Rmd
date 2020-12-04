@@ -1,0 +1,473 @@
+---
+title: "CSCI 385 - Second Deliverable"
+author: "Kris Selvidge"
+date: "12/03/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(modelr)
+library(jsonlite)
+library(caret)
+```
+
+# Introduction
+
+The domain of this project is network data and how we can use R to help  visualize performance metrics.  For this second deliverable I have narrowed down the more interesting website root captures from the previous deliverable and reran the experiment to collect more data.  
+
+Using Wireshark, a network packet capture program, I collected traffic data for each experiment session for analysis.  Results were exported to Javascript Object Notation format (JSON) and read into this R knit.
+
+A brief understanding of how my experiment was setup is indicated in the data set section from deliverable 1.  Background information on Wireshark is recommended, but specifics used for this capture are detailed below.
+
+# Revised Data Set 1
+
+After reviewing the data set for the previous first deliverable my instructor and classmates pointed out that some of the sites surveyed had either a much greater amount of data returned and/or greater variability seen throughout visualization.  When rerunning the experiment for Wireshark capture, we limited the scope of captures to this subset selection of websites.  The size of the JSON Wireshark files were significantly large due to traffic analysis additions (423 different column field types are recorded during a Wireshark capture).  I decided rather to run the experiment on all sites in one bash script that I would instead break it down into one script per site.  This resulted in a separately generated comma separated file (csv) for output fromd data set 1.  While I could have manually merged these files together prior to importing into R, I have chosen to load each separately and practice combining them within R Studio.
+
+Although it wasn't mentioned in deliverable 1, this first dataset is considered "tidy".  Each column represents only one variable value and each row represents a single observation.
+
+Loading Data Set 1 Subset Site 1: Amazon 
+```{r}
+amazon <- read_csv('D:\\fall2020\\TTH\\CSCI385 Data Science\\a2\\amazon.csv')
+```
+
+Loading Data Set 1 Subset Site 1: Facebook 
+```{r}
+facebook <- read_csv('D:\\fall2020\\TTH\\CSCI385 Data Science\\a2\\facebook.csv')
+```
+
+Loading Data Set 1 Subset Site 1: Google 
+```{r}
+google <- read_csv('D:\\fall2020\\TTH\\CSCI385 Data Science\\a2\\google.csv')
+```
+
+Loading Data Set 1 Subset Site 1: Yahoo 
+```{r}
+yahoo <- read_csv('D:\\fall2020\\TTH\\CSCI385 Data Science\\a2\\yahoo.csv')
+```
+
+Loading Data Set 1 Subset Site 1:Youtube 
+```{r}
+youtube <- read_csv('D:\\fall2020\\TTH\\CSCI385 Data Science\\a2\\youtube.csv')
+```
+
+Combining all Data Set 1 Subset Sites
+
+```{r}
+netdat <- bind_rows(amazon, facebook, google, yahoo, youtube)
+head(netdat)
+```
+
+Categorical Variables:
+
+* 'source' - 'character' - Origin location requesting root file from destination.  Note: In this phase of the experiement there is only one location (localhost) requesting data.  This computer is my local HP Omen 17 laptop running Ubuntu 18.
+
+* 'destination' - 'character' - Web server sending root file.  These hosts are ten top and popular websites.
+
+* 'protocol' - 'character' - Transfer protocol version HTTP (Hypertext Transfer Protocol) 1.0 or 1.1.  Note that twitter.com does not respond to HTTP 1.1 requests.
+
+Continuous Variables
+
+* 'chunkSize' - 'double' - Size of each chunk of packet data in bytes.  This value is the only continuous variable adjusted during the experiment.  Values range from 4 to 1000.
+
+(Note all variable values below were observed as a part of the experiment.)
+
+* 'tCount' - 'double' - Number of completed HTML markup tags parsed within chunks.  Tags markup content within documents and are opened with character '<' and closed with character '>'.
+
+* 'fileSize' - 'double' - Total root file size in bytes.
+
+* 'retransmits' - 'double' - Number of packets smaller than chunkSize indicating lost bytes that required a retransmit of data.
+
+* 'connectTime' - 'double' - Time in seconds to establish connection from source to destination.
+
+* 'requestTime' - 'double' - Time in seconds to submit request from source to destination.
+
+* 'receiveTime' - 'double' - Time in seconds to receive root file from destination to source.
+
+Manipulated/Independent Variables
+
+For our program experiment, we manually chose the following three variables as input to determine the resulting observations:
+
+destination (amazon.com, facebook.com, google.com, yahoo.com, youtube.com)
+protocol (HTTP/1, HTTP/1.1)
+chunkSize (4:120)
+
+# Exploratory Data Analysis
+
+In our first deliverable we were primarily focused on seeing what impact the size of each chunk packet processed in an HTTP transfer and whether protocols (HTTP/1 or HTTP/1.1) made a difference.  Using our 10 websites I observed that the only variables effected by chunkSize were tag counts (tCount), retransmits and receiving time.  After narrowing the observations and doing a rerun, I reviewed the relationship between these variables to confirm this still existed.
+
+Later we will try to model the impact of of our previously denoted manipulated/independent variables to predict their impact on one or more of these variables, so I am setting aside some data for testing.
+
+```{r}
+rest_rows <- as.vector(createDataPartition(netdat$chunkSize, p = 0.8, list = FALSE))
+test <- netdat[-rest_rows, ]
+rest <- netdat[rest_rows, ]
+```
+
+```{r}
+summary(rest)
+```
+
+Summary Observations: While in the first deliverable we looked at 18943 observations, in this case we have drastically fewer at 936 observations in deliverable 2.  Part of this is explained by a smaller set of websites.  However, I also reduced the number of the chunkSize variations because we saw very few changes to other variables when any chunkSize was over about 120, thus while the chunkSize minimum is still 4 we now have a new maximum of 120 rather than 1000.  The old range was 4-1000 or 996 total before and is now 4-120 or 116, thus we reduced by 880 which as a percentage of 996 is roughly 88% leaving 12% left.  As a few sites do not support http/1.1, removing half of the sites was not a perfect 50% but very close.  Finally we also reduced the results by 20% to set aside as test data so the remainder is 80%.  A comparison calculation closely matches the number of actual observations.  (18943 * 50% * 12% * 80%  or 909 vs 936 actual)
+
+Every request resulted in a response as it did in the first deliverable.  These sites were chosen because their root files were significantly larger than the other site root responses in the deliverable 1 observations.  From the summary we can confirm this by seeing the minimum file size returned is now 366 bytes whereas it was 150 in deliverable 1.  The median fileSize increased from 418 to and the mean from 1192 to.  The max remains about the same (49712 to 49669). 
+
+Chunk Size:
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = chunkSize), binwidth = 1)+
+  ggtitle("Frequency of Chunk Sizes")
+```
+
+Chunk Size is the variable we manually chose in our experiment to alter, so we should know exactly what the frequency is for each.  I made a range of chunkSize 4 to 120 in a regular integer interval (4,5,6...118,199,120).  There is one observation per chunk Size interval different per website (5) per protocol (2).  What we should in the histogram above is a flat line of a count of 10 for every chunk size.
+
+So why is it that this is not the case above?  While we do see a flat peak of 10 thoroughout the graph, we also see counts dipping randomly.  This is because we set aside 20% of the observation for future testing!  Just to confirm this, we can see what we would expect to see from the original unaltered data.
+
+```{r}
+ggplot(data = netdat) +
+  geom_histogram(mapping = aes(x = chunkSize), binwidth = 1)+
+  ggtitle("Frequency of Chunk Sizes (Pre Test Segregation")
+```
+
+File Size:
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = fileSize), binwidth = 100)+
+  ggtitle("Frequency of File Sizes")
+```
+
+We can see from the graph above for file size frequency that we are repeatedly receiving the same size files but there is some variability and a huge gap where there are no files between size 5000 and 45000 bytes.  Most observations show files near evenly split as either being under 5000 or between 45000-50000 bytes.  Is it perfectly even?  Let's change the width of the histogram bins and observe the results.
+
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = fileSize), binwidth = 25000)+
+  ggtitle("Frequency of File Sizes")
+```
+
+From comparing both charts above we can deduce that it is not exactly even, but as an approximation we could say of the 936 observations a little less than 400 are in the 45000-50000 range and somewhere around 550 are under 5000 bytes.   To try to understand why so many file sizes are clustered around each other, let's apply the graphs we used in deliverable one.
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = chunkSize, y = fileSize, color = protocol), alpha = 0.2) +
+  facet_wrap(~ destination, nrow = 2) +
+  ggtitle("File Size vs Chunk Size per Website by Protocol")
+```
+
+We can confirm from this table that the results are nearly identical to deliverable 1.  Google and Youtube root calls deliver substantially larger file sizes, explaining the gap in the first histogram above.
+
+What we did not note in the first deliverable is that it seems as though the file size is almost always the same for each web site (destination).  We can confirm this with a boxplot below:
+
+```{r}
+ggplot(data = rest) + 
+  geom_boxplot(mapping = aes(x = destination, y = fileSize), width = 1) +
+  facet_wrap(~ protocol) +
+  ggtitle("Variability of File Size per Website and Protocol") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+I am not quite sure how this connection may be of use to me later, but I'm going to make a note here that anyplace we measure the continuous variable fileSize as a factor on another variable we may also in some way associate it with the categorical separation by website (destination).  In other words, if we see an impact on another variable by fileSize, we cannot be certain it's not some other attribute of the website because we have not collected a variety of file sizes from the same website to test.
+
+
+Tag Counts:
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = tCount), binwidth = 1) + 
+  ggtitle("Frequency of Tag Counts")
+```
+
+We can see a significant gap in frequency for tag counts.  There are almost no observation of tag counts less than 50 or greater than 250, with almost all clustering under 50 or between 250 and 300.  This gap pattern is similar to the gap in file size above.  Let's next see if there looks like a pattern when comparing the two.
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = fileSize, y = tCount), alpha = 0.2) +
+  geom_smooth(mapping = aes(x = fileSize, y = tCount), method="lm", se = FALSE) +
+  ggtitle("Tag Counts vs File Size")
+```
+
+We can observe from increases in file size correspond with increases in tag counts and that the clusters we saw in histograms for both variables match (files < 5000 bytes have < 50 tags and files with 45000:50000 bytes have 250:300 tags).
+
+Is there any influence from our manipulated variable from the experiment?  Let's compare with chunk size.
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = chunkSize, y = tCount, color=fileSize), alpha = 0.2) +
+  ggtitle("Tag Counts vs Chunk Size")
+```
+
+For both groups of tags we looked at earlier (<50, 250:300) there is an increase of tag counts as chunk size increases.  The relationship appears to be logarithmic. 
+
+Retransmits:
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = retransmits), binwidth = 1)+
+  ggtitle("Frequency of Retransmits")
+```
+
+I'm seeing a large number of observations where files did not require many retransmits of packets, with some files requiring 10-15 packets to be resent.  Let's first look to see if larger files might be creating the need for more retransmits.
+
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = fileSize, y = retransmits), alpha = 0.2) +
+  ggtitle("Retransmits vs File Size")
+```
+
+Each cluster of file sizes appear to have all ranges of retransmission values.  There does not appear to be a pattern of influence from looking at this.  Let's try chunk size next.
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = chunkSize, y = retransmits), alpha = 0.2) +
+  ggtitle("Retransmits vs Chunk Size")
+```
+
+Again the values are widely spread.  While in the first deliverable we saw a few clusters of note in some of the websites at very high chunk values, we are not finding anything here in the revised set.  I will discard the number of retransmission in our modeling for now. 
+
+Receive Time:
+```{r}
+ggplot(data = rest) +
+  geom_histogram(mapping = aes(x = receiveTime), binwidth = 0.00005) + 
+  ggtitle("Frequency of Receive Time (Seconds)")
+```
+
+A large number of file transfers occurred under 0.005 with a sloped hill of frequency between the 0.005 and 0.015 value.  Very few took more than 0.015 seconds but there are a few scattered up to 0.070.  There are some minor gaps but nothing matching file size or tag counts.  Let's look at how it matches against file size directly:
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = fileSize, y = receiveTime), alpha = 0.2) +
+  ggtitle("Receive Time vs File Size")
+```
+While there is no clear sign that larger files produce higher receive times, it is clear that only higher receive times are coming from larger files.  Does chunk size have a more of an influence here?
+
+```{r}
+ggplot(data = rest) +
+  geom_point(mapping = aes(x = chunkSize, y = receiveTime,color = fileSize), alpha = 0.2) +
+  ggtitle("Receive Time vs Chunk Size")
+```
+
+It seems very clear here that larger files with smaller chunk sizes are connected to higher receiving times.
+
+# Data Modeling with Data Set 1
+
+So far I have a hunch that we could build a model wherein an increase in chunk size should increase tag count and decrease response time  logarithmically.  
+
+However, we have also observed that there should be a linear model between file size and tag count, so for this deliverable we will be limiting the scope to building and analyzing this.
+
+We will start with breaking up our remaining data we separated from the test group into two new groups: validation and training.  Our test set removed 20% of our data, and now we will put 60% into validation and the remaining 20% into test.  We want 60% of our remaining 80%, so we will split this off again into 25% and 75%.
+
+```{r}
+set.seed(1234)
+train_rows <- as.vector(createDataPartition(rest$chunkSize, p = 0.75, list = FALSE))
+train_rows
+validate <- rest[-train_rows, ]
+train <- rest[train_rows, ]
+```
+
+Next I will create the linear model to predict tag counts based on knowing the file size.
+
+```{r}
+model <- lm(tCount ~ fileSize, data = train)
+```
+
+This model can be used to make predictions based on the validation portion of the data we created earlier.
+
+```{r}
+predictions <- add_predictions(validate, model)
+predictions
+```
+
+Let's graph and compare our tCount values with the predictions from our new model.
+
+```{r}
+ggplot(data = predictions, mapping = aes(x = tCount, y = pred)) + 
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+```
+
+I also need to calculate goodness of fit measures for the model on the validation set.
+
+```{r}
+R2(predictions$pred, predictions$tCount)
+MAE(predictions$pred, predictions$tCount)
+RMSE(predictions$pred, predictions$tCount)
+```
+
+Next I will calculate and plot the residual values.
+
+```{r}
+resids <- add_residuals(validate, model)
+
+ggplot(data = resids, mapping = aes(x = fileSize, y = resid)) +
+  geom_ref_line(h = 0) +
+  geom_point()
+```
+
+I would also like to compare this with a cross validation training approach.
+
+```{r}
+train.control <- trainControl(method = "cv", number = 5)
+model <- train(tCount ~ fileSize, data = rest, method = "lm",
+               trControl = train.control)
+model
+summary(model)
+```
+
+Finally I will examine with the test set.
+
+```{r}
+predictions <- add_predictions(test, model)
+predictions
+
+ggplot(data = predictions, mapping = aes(x = tCount, y = pred)) + 
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+R2(predictions$pred, predictions$tCount)
+MAE(predictions$pred, predictions$tCount)
+RMSE(predictions$pred, predictions$tCount)
+
+resids <- add_residuals(test, model)
+resids
+
+ggplot(data = resids, mapping = aes(x = fileSize, y = resid)) +
+  geom_ref_line(h = 0) +
+  geom_point()
+```
+
+Initial Modeling and Testing Observations:
+
+All goodness of fit measurements scored very well.  However, the range of residuals and general gap in fileSize is still a concern.
+
+# Initial Data Set 2 Draft
+
+During the experiment, while the program ran I also collected packet capture data from Wireshark and exported the data to JSON.  As previously, I ran a separate bash script for each destination / web site.  The end result was 5 separate JSON files which I will now attempt to import the data into R and combine.
+
+```{r}
+netdat <- fromJSON("amazon.json",simplifyVector = TRUE,flatten = TRUE)
+netdat <- as_tibble(netdat) 
+
+names(netdat)<-make.names(names(netdat),unique = TRUE)
+
+netdat <- tibble(site="www.amazon.com",frame=netdat$X_source.layers.frame.frame.number,seq=netdat$X_source.layers.tcp.tcp.seq,nxtseq=netdat$X_source.layers.tcp.tcp.nxtseq,time=netdat$X_source.layers.frame.frame.time_delta,ttl=netdat$X_source.layers.ip.ip.ttl,src=netdat$X_source.layers.ip.ip.src,dst=netdat$X_source.layers.ip.ip.dst,srcport=netdat$X_source.layers.tcp.tcp.srcport,dstport=netdat$X_source.layers.tcp.tcp.dstport,len=netdat$X_source.layers.tcp.tcp.len)
+
+netdatc <- netdat
+
+netdat <- fromJSON("facebook.json",simplifyVector = TRUE,flatten = TRUE)
+netdat <- as_tibble(netdat)
+
+names(netdat)<-make.names(names(netdat),unique = TRUE)
+
+netdat <- tibble(site="www.facebook.com",frame=netdat$X_source.layers.frame.frame.number,seq=netdat$X_source.layers.tcp.tcp.seq,nxtseq=netdat$X_source.layers.tcp.tcp.nxtseq,time=netdat$X_source.layers.frame.frame.time_delta,ttl=netdat$X_source.layers.ip.ip.ttl,src=netdat$X_source.layers.ip.ip.src,dst=netdat$X_source.layers.ip.ip.dst,srcport=netdat$X_source.layers.tcp.tcp.srcport,dstport=netdat$X_source.layers.tcp.tcp.dstport,len=netdat$X_source.layers.tcp.tcp.len)
+
+netdatc <- bind_rows(netdatc,netdat)
+
+netdat <- fromJSON("google.json",simplifyVector = TRUE,flatten = TRUE)
+netdat <- as_tibble(netdat)
+
+names(netdat)<-make.names(names(netdat),unique = TRUE)
+
+netdat <- tibble(site="www.google.com",frame=netdat$X_source.layers.frame.frame.number,seq=netdat$X_source.layers.tcp.tcp.seq,nxtseq=netdat$X_source.layers.tcp.tcp.nxtseq,time=netdat$X_source.layers.frame.frame.time_delta,ttl=netdat$X_source.layers.ip.ip.ttl,src=netdat$X_source.layers.ip.ip.src,dst=netdat$X_source.layers.ip.ip.dst,srcport=netdat$X_source.layers.tcp.tcp.srcport,dstport=netdat$X_source.layers.tcp.tcp.dstport,len=netdat$X_source.layers.tcp.tcp.len)
+
+netdatc <- bind_rows(netdatc,netdat)
+
+netdat <- fromJSON("yahoo.json",simplifyVector = TRUE,flatten = TRUE)
+netdat <- as_tibble(netdat)
+
+names(netdat)<-make.names(names(netdat),unique = TRUE)
+
+netdat <- tibble(site="www.yahoo.com",frame=netdat$X_source.layers.frame.frame.number,seq=netdat$X_source.layers.tcp.tcp.seq,nxtseq=netdat$X_source.layers.tcp.tcp.nxtseq,time=netdat$X_source.layers.frame.frame.time_delta,ttl=netdat$X_source.layers.ip.ip.ttl,src=netdat$X_source.layers.ip.ip.src,dst=netdat$X_source.layers.ip.ip.dst,srcport=netdat$X_source.layers.tcp.tcp.srcport,dstport=netdat$X_source.layers.tcp.tcp.dstport,len=netdat$X_source.layers.tcp.tcp.len)
+
+netdatc <- bind_rows(netdatc,netdat)
+
+netdat <- fromJSON("youtube.json",simplifyVector = TRUE,flatten = TRUE)
+netdat <- as_tibble(netdat)
+
+names(netdat)<-make.names(names(netdat),unique = TRUE)
+
+netdat <- tibble(site="www.youtube.com",frame=netdat$X_source.layers.frame.frame.number,seq=netdat$X_source.layers.tcp.tcp.seq,nxtseq=netdat$X_source.layers.tcp.tcp.nxtseq,time=netdat$X_source.layers.frame.frame.time_delta,ttl=netdat$X_source.layers.ip.ip.ttl,src=netdat$X_source.layers.ip.ip.src,dst=netdat$X_source.layers.ip.ip.dst,srcport=netdat$X_source.layers.tcp.tcp.srcport,dstport=netdat$X_source.layers.tcp.tcp.dstport,len=netdat$X_source.layers.tcp.tcp.len)
+
+netdat <- bind_rows(netdatc,netdat)
+
+
+transmute(netdat, frame = as.double(frame),seq = as.double(seq),nxtseq = as.double(nxtseq),time = as.double(time),ttl = as.double(ttl),srcport = as.double(srcport),dstport = as.double(dstport),len = as.double(len))
+
+head(unique(netdat$site),n=20)
+head(unique(netdat$frame),n=20)
+head(unique(netdat$seq),n=20)
+head(unique(netdat$nxtseq),n=20)
+head(unique(netdat$time),n=20)
+head(unique(netdat$ttl),n=20)
+head(unique(netdat$src),n=20)
+head(unique(netdat$dst),n=20)
+head(unique(netdat$srcport),n=20)
+head(unique(netdat$dstport),n=20)
+head(unique(netdat$len),n=20)
+
+```
+
+Of the 423 Wireshark variables captured, I have found ten I would like to work with for the second set.  
+
+Continuous Variables
+
+frame (Frame Number): Identification of frame.  Note some frame values will be missing because only TCP frames are captured.  Other frames such as DNS lookup and miscellaneous traffic have been filtered out.
+
+time (Frame Time Delta): Time in seconds to start and end frame.
+
+seq (TCP Sequence Number): Starting byte of fragment/sequence.
+
+nxtseq (TCP Next Sequence Number): Ending byte of fragment/sequence pointing to start of next fragment/sequence.
+
+ttl (IP Time to Live): Maximum allowed hops (router/routes) over the internet between the source and destination.
+
+len (TCP Data Length): Size of data transferred in TCP packet.
+
+Categorical
+
+src (IP Source): Internet address where data is being transferred from.
+
+dst (IP Destination): Internet address where data is being transferred to.
+
+srcport (TCP Source Port): Network port where data is being transferred from.
+
+dstport (TCP Destination Port): Network port where data is being transferred to.
+
+site (Website): Name of website corresponding to .json Wireshark capture data. 
+
+Data Set 2 reflects the same file transfers that occurred to create Data Set 1.  However, so far there is no clear and easy hook to corss reference the two.  The most important variable in the experiment, 'chunkSize', is not reflected in Wireshark because it is a product of the C program's method of processing socket information.  Wireshark can only capture data passed to and from the computer to the websites and chunkSize is not passed outside of the C program.
+
+What we will try to do to tie the two together in the next deliverable is to match Data Set 2's site with Data Set 1's destination(website).  Frames are processed sequentially in the same order that the chunkSize was sent out, so once we identify distinct sets of frames as a single transaction of the program we will be able to map these together.
+
+The difficult will be in filtering out all the sequence and next sequence numbers and keeping track of each new file transfer to correspond with Data Set #1's chunkSize.  We should have this process completed for Deliverable 3.
+
+With this additional information tied in we should be able to explore if other network factors can be incorporated to improve our modeling.
+
+# Data Science Questions
+
+Can we predict the number of tags that a website's root file based on the total file size?  Based on the limited collection of sites so far it seems as though this is possible with a simple linear model. 
+
+How does the size of chunk parsing impact response time and tag count? Our data observations in deliverable 2 lead me to believe I can create a logarithmic model using chunkSize to predict tCount and receiveTime.  This will be a part of Deliverable 3.  The ultimate question would be can we use this model to help optimise chunkSize usage?  If the model is known then the C program could incorporate it into its functionality, processing at an optimal chunkSize to browse web files.
+
+
+Ethical Implications
+
+Opacity:
+While the data collection is relatively straightforward and my code is available for inspection to recreate my experiment, an understanding of C programming is required for scrutiny.  The learning curve is rudimentary however.  Wireshark is a very complicated program, and knowing about network functionality is helpful in understanding these models.
+
+Scale:
+Although my experiment can be reran to include other protocols and a much larger number of websites, the R modeling here would need to be adjusted and reconsidered for such a larger scale.
+
+For future deliveribles, I would like to tie in my C program's experiment with similar file transfer captured by Wireshark.
+
+The process would be as follows:
+C Program Captures to CSV (deliverable 1 and 2)
+Wireshark Captures to JSON (deliverable 2)
+C Program Data is Cross Referenced to Wireshark (Deliverable 3)
+Multiple Web Browsers (Chrome, Firefox, Edge) Collect Root of same Sites (Deliverable 3)
+Wireshark Captures to JSON of Browsers Data (Deliverable 3)
+Web Browser and C Program are Cross Referenced for Analysis and Modeling
+
+Damage:
+Benchmarks results could be misinterpreted if compared to newer versions of protocols for web file transfer.  HTTP/2 was introduced in 2015 and is currently used by 7% of web browsers.  Unlike HTTP/1.0 and 1.1, this new protocol allows synchronous communication through web sockets for two way simulanteous communication.  HTTP/3 is an upcoming standard that is currently only in use by Safari 14 introduced in September 2020, though over 10 million websites have implemented support for this newer standard.  Unlike HTTP/2 and HTTP 1.0 and 1.1, HTTP/3 uses a new transport protocol called QUIC (general purpose transfer protocol) instead of the previous TCP (transfer control protocol).  Future experiments using modern browser test could include HTTP/2 and HTTP/3 comparisons.
+
+
+
